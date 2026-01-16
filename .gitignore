@@ -214,3 +214,19 @@ data/
 *.tar.gz
 wandb/
 runs/
+
+# Data / experiment artifacts
+data/
+runs/
+wandb/
+
+# Python / notebooks
+__pycache__/
+**/__pycache__/
+.ipynb_checkpoints/
+
+# ML checkpoints / archives
+*.pt
+*.pth
+*.ckpt
+*.tar.gz
