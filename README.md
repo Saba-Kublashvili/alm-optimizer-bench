@@ -1,42 +1,98 @@
 # ALM Optimizer Bench
+**Augmented Lagrangian constrained training vs. standard optimizers (image classification).**
 
-This repository benchmarks an Augmented Lagrangian Method (ALM)-style constrained training variant against standard optimizers on image classification.
+This repository contains the full experimental code, logged results, and paper-ready artifacts for an **Augmented Lagrangian Method (ALM)** training approach that enforces a **global constraint** during deep network optimization and compares it against standard baselines (AdamW, SGD).
 
-## What is included
-- A reproducible notebook with full experiment code and logs:
-  - `notebooks/alm_experiments.ipynb`
-- A code-export for review/searchability (auto-generated from the notebook):
-  - `src/alm_experiments.py`
-- Paper-ready result artifacts (CSV/TXT):
+Source of truth: `notebooks/alm_experiments.ipynb`  
+Exported code for review/search: `src/alm_experiments.py`
+
+---
+## 1. Problem Setting (Constrained Learning)
+
+We consider empirical risk minimization with an additional constraint:
+
+\[
+\min_{\theta \in \mathbb{R}^d} \; f(\theta)
+\quad \text{s.t.} \quad g(\theta) \le 0.
+\]
+
+- \(f(\theta)\): training objective (cross-entropy + weight decay).
+- \(g(\theta)\): constraint measuring a global budget/statistic of the model.
+
+In this benchmark we instantiate the constraint via a log-budget surrogate \(\log K(\theta)\) with target \(B\):
+
+\[
+g(\theta) = \log K(\theta) - B.
+\]
+
+---
+## 2. ALM Updates and KKT Connection
+
+The augmented Lagrangian is:
+
+\[
+\mathcal{L}_A(\theta,\lambda,\rho)
+= f(\theta) + \lambda g(\theta) + \frac{\rho}{2} g(\theta)^2,
+\]
+with \(\lambda \ge 0\) and \(\rho>0\).
+
+Classical KKT conditions for a (local) optimum \(\theta^\star\) include:
+- Primal feasibility: \(g(\theta^\star)\le 0\)
+- Dual feasibility: \(\lambda^\star \ge 0\)
+- Complementary slackness: \(\lambda^\star g(\theta^\star)=0\)
+- Stationarity:
+\[
+\nabla f(\theta^\star) + \lambda^\star \nabla g(\theta^\star)=0.
+\]
+
+Deep nets are stochastic and non-convex, so this repo uses a practical stochastic ALM variant:
+- minibatch gradients for \(f\),
+- periodic evaluation of \(g(\theta)\),
+- bounded penalty growth and projected dual ascent for stability.
+
+Primal step (implemented on top of AdamW):
+\[
+\theta_{t+1} \leftarrow \theta_t - \eta \, \widehat{\nabla_\theta \mathcal{L}_A(\theta_t,\lambda_t,\rho_t)}.
+\]
+
+Projected dual step:
+\[
+\lambda_{t+1} \leftarrow \max\{0,\; \lambda_t + \alpha\, g(\theta_t)\}.
+\]
+
+Penalty adaptation (bounded):
+\[
+\rho_{t+1} \leftarrow \min(\rho_{\max},\gamma\rho_t)
+\quad \text{only under persistent violation.}
+\]
+
+---
+## 3. Repository Contents
+
+- Notebook (source of truth): `notebooks/alm_experiments.ipynb`
+- Exported script (auto-generated): `src/alm_experiments.py`
+- Results tables:
   - `results/tables/c10_r18_paired_seed_results.csv`
   - `results/tables/c10_r18_stats.txt`
-- Utility scripts:
-  - `scripts/make_plots.py` generates figures from CSV results.
-  - `scripts/recompute_stats.py` recomputes bootstrap CI and paired permutation p-value from the CSV.
-  - `scripts/export_notebook_to_src.sh` re-exports the notebook to `src/` (optional helper).
+  - `results/tables/c10_r18_stats_recomputed.txt`
+- Figures:
+  - `results/figures/c10_r18_test_acc_by_seed.png`
+  - `results/figures/c10_r18_paired_diff.png`
+- Utilities:
+  - `scripts/make_plots.py`
+  - `scripts/recompute_stats.py`
 
-## Setup (local)
-Create a fresh environment and install:
-1) `python -m venv .venv`
-2) Activate it:
-   - Windows PowerShell: `.\.venv\Scripts\Activate.ps1`
-   - Git Bash: `source .venv/Scripts/activate`
-3) `pip install -r requirements.txt`
+## 4. CIFAR-10 / ResNet-18 (paired-seed evaluation)
 
-## Results: CIFAR-10 / ResNet-18 (paired seeds)
-See:
-- `results/tables/c10_r18_paired_seed_results.csv`
-- `results/tables/c10_r18_stats.txt`
+We report paired-seed evaluation for AdamW vs ALM-on-AdamW.  
+See the raw table in `results/tables/c10_r18_paired_seed_results.csv`.
 
-To generate plots and recompute stats:
-- `python scripts/make_plots.py`
-- `python scripts/recompute_stats.py`
+Summary statistics (paired bootstrap CI + paired permutation test):
+- `results/tables/c10_r18_stats.txt` (original run output)
+- `results/tables/c10_r18_stats_recomputed.txt` (recomputed from CSV)
 
-## Notes on reproducibility
-These experiments are sensitive to training recipes (data augmentation, schedules, batch size, etc.). If you add new experiments, save them under `results/tables/` (CSV + TXT summary), and optionally add figures to `results/figures/`.
+Interpretation guideline:
+- Overlapping CIs and a high paired permutation p-value indicate **no statistically significant improvement** under this specific recipe.
+- The ALM method still demonstrates a clean, end-to-end constrained-training implementation and stable runs with tracked constraint diagnostics.
 
-## Repo structure
-- `notebooks/` : interactive experiments (source of truth)
-- `src/`       : exported script version (for review/search)
-- `results/`   : saved artifacts (tables/figures) suitable for papers
-- `scripts/`   : utilities for export/plot/stat recomputation
+---
