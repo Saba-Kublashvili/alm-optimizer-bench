@@ -1,0 +1,10 @@
+torch
+torchvision
+torchaudio
+numpy
+pandas
+tqdm
+matplotlib
+scipy
+jupyter
+nbconvert
