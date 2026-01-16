@@ -88,15 +88,14 @@ with an adaptive schedule that increases penalty under persistent violation and 
 ## 3) Controller architecture (diagram)
 ```mermaid
 flowchart LR
-  A[Minibatch loss f(theta)] --> G[Compute grad_f]
-  B[Constraint statistic logK(theta)] --> V[Violation g(theta)=logK(theta)-B]
-  V --> E[EMA violation g_ema]
-  E --> L[Dual update: lambda <- proj(lambda + alpha*g_ema)]
-  E --> R[Penalty update: rho schedule + clipping]
-  L --> P[Augmented term: lambda*grad_g]
-  R --> Q[Penalty term: rho*[g]_+*grad_g]
-  G --> S[Total grad = grad_f + lambda*grad_g + rho*[g]_+*grad_g]
-  P --> S
-  Q --> S
-  S --> U[AdamW step]
+  A[Minibatch loss f(theta)] --> G[Compute grad f]
+  B[Constraint statistic logK(theta)] --> V[Compute violation g]
+  V --> E[EMA of violation]
+  E --> L[Update dual variable lambda]
+  E --> R[Update penalty rho]
+  G --> S[Form augmented gradient]
+  L --> S
+  R --> S
+  S --> U[AdamW parameter update]
   U --> B
+
