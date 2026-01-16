@@ -1,98 +1,100 @@
+cat > README.md <<'EOF'
 # ALM Optimizer Bench
-**Augmented Lagrangian constrained training vs. standard optimizers (image classification).**
+**KKT-guided Augmented Lagrangian constrained training on top of AdamW (image classification).**
 
-This repository contains the full experimental code, logged results, and paper-ready artifacts for an **Augmented Lagrangian Method (ALM)** training approach that enforces a **global constraint** during deep network optimization and compares it against standard baselines (AdamW, SGD).
+This repository contains a **from-scratch** implementation of a practical **Augmented Lagrangian Method (ALM)** controller integrated with modern deep-learning training (PyTorch + AMP). The goal is to turn *constrained optimization theory* (KKT / ALM) into a **plug-and-play training mechanism** that can enforce a **global constraint** during deep network optimization while remaining competitive with strong baselines.
 
-Source of truth: `notebooks/alm_experiments.ipynb`  
-Exported code for review/search: `src/alm_experiments.py`
+- Source of truth: `notebooks/alm_experiments.ipynb`
+- Exported code (auto-generated): `src/alm_experiments.py`
+- Paper-ready artifacts: `results/tables/*`, `results/figures/*`
 
 ---
-## 1. Problem Setting (Constrained Learning)
 
-We consider empirical risk minimization with an additional constraint:
+## What this is (one paragraph)
+We study empirical risk minimization with an additional inequality constraint (a “budget” over a global statistic). We implement a **stochastic ALM** wrapper that:
+1) adds the ALM penalty/dual terms to the primal gradient (optimized with AdamW),  
+2) updates the dual variable via projected ascent,  
+3) adapts the penalty weight with bounded growth/shrink for stability under stochastic gradients.
 
+This is an **early-stage research system**, but it already demonstrates **stable constrained training** and **baseline-competitive accuracy** on CIFAR-10/ResNet-18 under paired-seed evaluation.
+
+---
+
+## 1) Constrained learning formulation
+We consider:
 \[
 \min_{\theta \in \mathbb{R}^d} \; f(\theta)
-\quad \text{s.t.} \quad g(\theta) \le 0.
+\quad \text{s.t.} \quad g(\theta)\le 0,
 \]
+where:
+- \(f(\theta)\) is the standard training objective (cross-entropy + weight decay),
+- \(g(\theta)\) is a scalar constraint measuring a global model/training statistic.
 
-- \(f(\theta)\): training objective (cross-entropy + weight decay).
-- \(g(\theta)\): constraint measuring a global budget/statistic of the model.
-
-In this benchmark we instantiate the constraint via a log-budget surrogate \(\log K(\theta)\) with target \(B\):
-
+### Budget instantiation used in this benchmark
+We use a log-budget surrogate:
 \[
-g(\theta) = \log K(\theta) - B.
+g(\theta) = \log K(\theta) - B,
 \]
+where \(B\) is a chosen budget (in log-space). The implementation logs:
+- `logK` (the statistic),
+- `B` (the target budget),
+- `g_ema` (EMA-smoothed violation),
+- and the controller state (`lam`, `rho`).
+
+> Note: the ALM machinery is agnostic to the specific \(K(\theta)\) as long as it is differentiable / autograd-friendly.
 
 ---
-## 2. ALM Updates and KKT Connection
 
-The augmented Lagrangian is:
+## 2) KKT connection and ALM objective
+For inequality constraints, the KKT conditions (informally) require:
+- primal feasibility \(g(\theta^\star)\le 0\),
+- dual feasibility \(\lambda^\star \ge 0\),
+- complementary slackness \(\lambda^\star g(\theta^\star)=0\),
+- stationarity \(\nabla f(\theta^\star) + \lambda^\star \nabla g(\theta^\star)=0\).
 
+We implement an augmented Lagrangian:
 \[
 \mathcal{L}_A(\theta,\lambda,\rho)
-= f(\theta) + \lambda g(\theta) + \frac{\rho}{2} g(\theta)^2,
+= f(\theta) + \lambda\,g(\theta) + \frac{\rho}{2}\,[g(\theta)]_+^2,
+\quad \lambda\ge 0,\;\rho>0,
 \]
-with \(\lambda \ge 0\) and \(\rho>0\).
+where \([x]_+=\max(x,0)\).
 
-Classical KKT conditions for a (local) optimum \(\theta^\star\) include:
-- Primal feasibility: \(g(\theta^\star)\le 0\)
-- Dual feasibility: \(\lambda^\star \ge 0\)
-- Complementary slackness: \(\lambda^\star g(\theta^\star)=0\)
-- Stationarity:
+### Practical stochastic updates (what the code does)
+**Primal step (AdamW on augmented gradient):**
 \[
-\nabla f(\theta^\star) + \lambda^\star \nabla g(\theta^\star)=0.
+\theta_{t+1} = \mathrm{AdamW}\!\left(\theta_t,\;
+\nabla f(\theta_t) + \lambda_t \nabla g(\theta_t) + \rho_t [g(\theta_t)]_+\, \nabla g(\theta_t)\right).
 \]
 
-Deep nets are stochastic and non-convex, so this repo uses a practical stochastic ALM variant:
-- minibatch gradients for \(f\),
-- periodic evaluation of \(g(\theta)\),
-- bounded penalty growth and projected dual ascent for stability.
-
-Primal step (implemented on top of AdamW):
+**Dual ascent (projected):**
 \[
-\theta_{t+1} \leftarrow \theta_t - \eta \, \widehat{\nabla_\theta \mathcal{L}_A(\theta_t,\lambda_t,\rho_t)}.
+\lambda_{t+1} = \Pi_{[0,\lambda_{\max}]}\left(\lambda_t + \alpha \,\tilde g_t\right),
+\qquad
+\tilde g_t = \beta \tilde g_{t-1} + (1-\beta)g(\theta_t).
 \]
 
-Projected dual step:
+**Penalty control (bounded):**
 \[
-\lambda_{t+1} \leftarrow \max\{0,\; \lambda_t + \alpha\, g(\theta_t)\}.
+\rho \leftarrow \mathrm{clip}(\rho,\rho_{\min},\rho_{\max}),
 \]
-
-Penalty adaptation (bounded):
-\[
-\rho_{t+1} \leftarrow \min(\rho_{\max},\gamma\rho_t)
-\quad \text{only under persistent violation.}
-\]
+with an adaptive schedule that increases penalty only when violation persists and relaxes when feasibility is achieved (details in the notebook).
 
 ---
-## 3. Repository Contents
 
-- Notebook (source of truth): `notebooks/alm_experiments.ipynb`
-- Exported script (auto-generated): `src/alm_experiments.py`
-- Results tables:
-  - `results/tables/c10_r18_paired_seed_results.csv`
-  - `results/tables/c10_r18_stats.txt`
-  - `results/tables/c10_r18_stats_recomputed.txt`
-- Figures:
-  - `results/figures/c10_r18_test_acc_by_seed.png`
-  - `results/figures/c10_r18_paired_diff.png`
-- Utilities:
-  - `scripts/make_plots.py`
-  - `scripts/recompute_stats.py`
+## 3) Architecture diagram (controller loop)
+```mermaid
+flowchart LR
+  A[Mini-batch loss f(θ)] --> G[Compute grad ∇f]
+  B[Constraint statistic logK(θ)] --> V[Violation g(θ)=logK(θ)-B]
+  V --> E[EMA violation g_ema]
+  E --> L[Dual update: λ ← Proj(λ + α g_ema)]
+  E --> R[Penalty update: ρ schedule + clipping]
+  L --> P[Augmented grad term: λ∇g]
+  R --> Q[Penalty grad term: ρ[g]_+∇g]
+  G --> S[Total grad: ∇f + λ∇g + ρ[g]_+∇g]
+  P --> S
+  Q --> S
+  S --> U[AdamW step]
+  U --> B
 
-## 4. CIFAR-10 / ResNet-18 (paired-seed evaluation)
-
-We report paired-seed evaluation for AdamW vs ALM-on-AdamW.  
-See the raw table in `results/tables/c10_r18_paired_seed_results.csv`.
-
-Summary statistics (paired bootstrap CI + paired permutation test):
-- `results/tables/c10_r18_stats.txt` (original run output)
-- `results/tables/c10_r18_stats_recomputed.txt` (recomputed from CSV)
-
-Interpretation guideline:
-- Overlapping CIs and a high paired permutation p-value indicate **no statistically significant improvement** under this specific recipe.
-- The ALM method still demonstrates a clean, end-to-end constrained-training implementation and stable runs with tracked constraint diagnostics.
-
----
