@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+title: "ALM Optimizer Bench"
+message: "If you use this repository, please cite it as below."
+type: software
+authors:
+  - family-names: "Kublashvili"
+    given-names: "Saba"
+repository-code: "https://github.com/Saba-Kublashvili/alm-optimizer-bench"
+license: "MIT"

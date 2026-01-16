@@ -1,0 +1,5 @@
+FINAL RESULTS (paired by seed)
+AdamW test_acc: mean=0.9035  95%CI=[0.8995,0.9065]
+ALM   test_acc: mean=0.9012  95%CI=[0.8982,0.9042]
+Paired permutation p-value (ALM vs AdamW): 0.500742
+Mean diff (ALM-AdamW) = -0.0022
